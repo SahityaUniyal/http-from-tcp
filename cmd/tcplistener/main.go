@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 )
 
@@ -45,12 +46,28 @@ func getLinesChannel(f io.ReadCloser) <-chan string {
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	fs, err := os.Open("message.txt")
+
+	lr, err := net.Listen("tcp", ":42069")
 	if err != nil {
-		log.Error("error opening file", "error", err.Error())
+		log.Error("error listening on port :42069", "error", err)
+		return
 	}
-	lines := getLinesChannel(fs)
-	for line := range lines {
-		fmt.Printf("%s\n", line)
+	defer lr.Close()
+
+	log.Info("Listening on port :42069")
+
+	for {
+		conn, err := lr.Accept()
+		if err != nil {
+			log.Error("error accepting the connection", "error", err)
+			return
+		}
+
+		lines := getLinesChannel(conn)
+
+		for line := range lines {
+			fmt.Println(line)
+		}
+		log.Info("Connection closed after reading")
 	}
 }
