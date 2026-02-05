@@ -1,48 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
-	"io"
+	"http-from-tcp/internal/request"
 	"log/slog"
 	"net"
 	"os"
 )
-
-func getLinesChannel(f io.ReadCloser) <-chan string {
-	out := make(chan string, 1)
-	var err error
-	go func() {
-		defer f.Close()
-		defer close(out)
-
-		line := ""
-		for {
-			data := make([]byte, 8)
-			n, err := f.Read(data)
-			if err != nil {
-				break
-			}
-			data = data[:n]
-			if i := bytes.IndexByte(data, '\n'); i != -1 {
-				line += string(data[:i])
-				data = data[i+1:]
-				out <- string(line)
-				line = ""
-			}
-			line += string(data)
-		}
-		if err != nil && err != io.EOF {
-			slog.Error("Error reading file", "error", err)
-			close(out)
-			return
-		}
-		if len(line) != 0 {
-			out <- line
-		}
-	}()
-	return out
-}
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -63,11 +27,16 @@ func main() {
 			return
 		}
 
-		lines := getLinesChannel(conn)
-
-		for line := range lines {
-			fmt.Println(line)
+		request, err := request.RequestFromReader(conn)
+		if err != nil {
+			log.Error(fmt.Sprintf("error reading from the connection :: %v", err))
+			return
 		}
+		fmt.Println("Request Line:")
+		fmt.Printf("Method: %v\n", request.RequestLine.Method)
+		fmt.Printf("Target: %v\n", request.RequestLine.RequestTarget)
+		fmt.Printf("Version: %v\n", request.RequestLine.HttpVersion)
+
 		log.Info("Connection closed after reading")
 	}
 }
