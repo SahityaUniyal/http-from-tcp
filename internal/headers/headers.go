@@ -36,6 +36,11 @@ func (h Headers) Override(key, value string) {
 	h[key] = value
 }
 
+func (h Headers) Delete(key string) {
+	key = strings.ToLower(key)
+	delete(h, key)
+}
+
 func (h Headers) isToken(str string) bool {
 	for _, ch := range str {
 		found := false
