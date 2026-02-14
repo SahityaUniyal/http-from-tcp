@@ -42,6 +42,8 @@ func main() {
 			fmt.Printf("- %v: %v\n", key, value)
 		}
 
+		fmt.Println("Body:")
+		fmt.Printf("%s\n", request.Body)
 		log.Info("Connection closed after reading")
 	}
 }

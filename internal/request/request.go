@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"http-from-tcp/internal/headers"
 	"io"
-	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -14,6 +14,7 @@ type parserState int
 const (
 	RequestStateInit parserState = iota
 	RequestStateParsingHeader
+	RequestStateParsingBody
 	RequestStateParsed
 )
 
@@ -25,6 +26,8 @@ var ErrorMalformedStartLine = fmt.Errorf("bad request line")
 var ErrorInvalidData = fmt.Errorf("invalid data")
 var ErrorInvalidRequestLine = fmt.Errorf("invalid request line")
 var ErrorParsingRequestLine = fmt.Errorf("unable to parse request line even after parsing the complete data sent")
+var ErrorBodyLengthExceeded = fmt.Errorf("body length is more than the content-length header")
+var ErrorReadingBody = fmt.Errorf("error reading the body")
 
 type RequestLine struct {
 	HttpVersion   string
@@ -34,29 +37,40 @@ type RequestLine struct {
 
 func (r *RequestLine) ValidateRequestLine() bool {
 	if r.HttpVersion != "1.1" {
-		slog.Error("unsupported http version")
 		return false
 	}
 
 	if !slices.Contains(ValidMethods, r.Method) {
-		slog.Error("unsupported http method")
 		return false
 	}
 
 	return true
 }
 
+func getInt(val string, defValue int) (int, error) {
+	if val == "" {
+		return defValue, nil
+	}
+
+	intVal, err := strconv.Atoi(val)
+	if err != nil {
+		return 0, err
+	}
+	return intVal, nil
+}
+
 type Request struct {
 	RequestLine RequestLine
 	Headers     headers.Headers
-	// Body        []byte
-	State parserState
+	Body        []byte
+	State       parserState
 }
 
 func NewRequest() *Request {
 	return &Request{
 		State:   RequestStateInit,
 		Headers: headers.NewHeaders(),
+		Body:    []byte{},
 	}
 }
 
@@ -82,9 +96,7 @@ outer:
 			read = parsedLength
 
 		case RequestStateParsingHeader:
-			// slog.Info("Request#parse state-header", "current-data", currentData)
 			n, done, err := r.Headers.Parse(currentData)
-			// slog.Info("Request#parse state-header", "n", n, "done", done)
 			if err != nil {
 				return 0, err
 			}
@@ -95,8 +107,39 @@ outer:
 			read += n
 
 			if done {
-				r.State = RequestStateParsed
+				r.State = RequestStateParsingBody
 			}
+
+		case RequestStateParsingBody:
+			contentLength, err := getInt(r.Headers.Get("Content-Length"), 0)
+			if err != nil {
+				return 0, err
+			}
+
+			if contentLength == 0 {
+				r.State = RequestStateParsed
+				break outer
+			}
+
+			if len(currentData) == 0 {
+				if len(r.Body) != contentLength {
+					return 0, ErrorReadingBody
+				}
+				r.State = RequestStateParsed
+				break outer
+			}
+
+			if len(r.Body)+len(currentData) > contentLength {
+				return 0, ErrorBodyLengthExceeded
+			}
+
+			r.Body = append(r.Body, currentData...)
+			read += len(currentData)
+			if len(r.Body) == contentLength {
+				r.State = RequestStateParsed
+				break outer
+			}
+			break outer
 
 		case RequestStateParsed:
 			break outer
@@ -166,5 +209,4 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 	}
 
 	return request, nil
-
 }
